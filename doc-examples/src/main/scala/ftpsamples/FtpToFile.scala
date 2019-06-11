@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package ftpsamples
@@ -19,6 +19,7 @@ import playground.{ActorSystemAvailable, FtpServerEmbedded}
 import scala.collection.immutable
 import scala.concurrent.Future
 import scala.util.{Failure, Success}
+
 // #sample
 
 object FtpToFile extends ActorSystemAvailable with App {
@@ -27,21 +28,20 @@ object FtpToFile extends ActorSystemAvailable with App {
 
   val port = AvailablePortFinder.getNextAvailable(21000)
   val ftpServer = FtpServerEmbedded.start(ftpFileSystem.fileSystem, port)
-  //
+
   ftpFileSystem.generateFiles(30, 10, "/home/anonymous")
   ftpFileSystem.putFileOnFtp("/home/anonymous", "hello.txt")
   ftpFileSystem.putFileOnFtp("/home/anonymous", "hello2.txt")
 
   // #sample
-  val ftpSettings = FtpSettings(InetAddress.getByName("localhost"), port)
+  val ftpSettings = FtpSettings(InetAddress.getByName("localhost")).withPort(port)
 
   // #sample
 
   val targetDir = Paths.get("target/")
   val fetchedFiles: Future[immutable.Seq[(String, IOResult)]] =
     // format: off
-  // #sample
-
+    // #sample
     Ftp
       .ls("/", ftpSettings)                                    //: FtpFile (1)
       .filter(ftpFile => ftpFile.isFile)                       //: FtpFile (2)
@@ -55,7 +55,7 @@ object FtpToFile extends ActorSystemAvailable with App {
         }
       }                                                        //: (String, IOResult)
       .runWith(Sink.seq)                                       // (6)
-  // #sample
+    // #sample
   // format: on
   fetchedFiles
     .map { files =>
@@ -68,7 +68,7 @@ object FtpToFile extends ActorSystemAvailable with App {
         case Success(errors) =>
           println(s"errors occured: ${errors.mkString("\n")}")
         case Failure(exception) =>
-          println("The stream failed")
+          println("the stream failed")
       }
       actorSystem.terminate().onComplete { _ =>
         ftpServer.stop()

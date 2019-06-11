@@ -1,35 +1,166 @@
 language: scala
-
 sudo: false
-
-scala:
-  - "2.11.11"
-  - "2.12.4"
-
-jdk:
-  - oraclejdk8
 
 services:
   - docker
 
 before_install:
-  - docker-compose up -d
+  # make comparing to origin/master work and fetch full history for correct current and previous version detection
+  - git remote set-branches --add origin master && git fetch --unshallow
 
+# default script for jobs, that do not have any specified
 script:
-  - sbt -J-XX:ReservedCodeCacheSize=128m ++$TRAVIS_SCALA_VERSION ";test:compile;docs/paradox"
-  # make 'git branch' work again
-  - git branch -f "$TRAVIS_BRANCH" && git checkout "$TRAVIS_BRANCH"
-  # make comparing to origin/master work
-  - git remote set-branches --add origin master
-  - git fetch
-  # check unformatted code
-  - git diff --exit-code --color || { echo "[error] Unformatted code found. Please run 'test:compile' and commit the reformatted code."; false; } && sbt -J-XX:ReservedCodeCacheSize=128m ++$TRAVIS_SCALA_VERSION ";testChanged"
-  # check policies, if on master also upload
-  - if [[ "$TRAVIS_SECURE_ENV_VARS" == "true" ]]; then if [[ "$TRAVIS_BRANCH" == "master" && "$TRAVIS_EVENT_TYPE" == "push" ]]; then sbt 'set credentials += Credentials("whitesource", "whitesourcesoftware.com", "", System.getenv("WHITESOURCE_KEY"))' whitesourceCheckPolicies whitesourceUpdate; else sbt 'set credentials += Credentials("whitesource", "whitesourcesoftware.com", "", System.getenv("WHITESOURCE_KEY"))' whitesourceCheckPolicies; fi ; fi
-  - find . -name "*.log" -exec ./scripts/cat-log.sh {} \;
+  - ./scripts/buildChanged.sh ${DIR:=.} "${JDK:=adopt@~1.8.202-08}" "${PRE_CMD:=echo NOOP}" "${CMD:=+$DIR/testChanged}"
+
+jobs:
+  include:
+    - stage: check
+      script: sbt scalafmtCheckAll || { echo "[error] Unformatted code found. Please run 'scalafmtAll' and commit the reformatted code."; false; }
+      name: "Code style check (fixed with `sbt scalafmtAll`)"
+    - script: sbt scalafmtSbtCheck || { echo "[error] Unformatted sbt code found. Please run 'scalafmtSbt' and commit the reformatted code."; false; }
+      name: "Build code style check (fixed with `sbt scalafmtSbt`)"
+    - env: CMD="++2.11.12 Test/compile"
+      name: "Compile all tests (with Scala 2.11)"
+    - env: CMD="++2.13.0-M5 Test/compile"
+      name: "Compile all tests (with Scala 2.13)"
+    - env: CMD="unidoc"
+      name: "Create all API docs"
+    - env: CMD="docs/paradox"
+      name: "Create site with Paradox"
+    - env: CMD="mimaReportBinaryIssues"
+      name: "Check binary compatibility"
+
+    - stage: test
+      env:
+      - DIR=amqp
+      - PRE_CMD="docker-compose up -d amqp"
+    - env:
+      - DIR=avroparquet
+    - env:
+      - DIR=awslambda
+    - env:
+      - DIR=azure-storage-queue
+    - env:
+      - DIR=cassandra
+      - PRE_CMD="docker-compose up -d cassandra"
+    - env:
+      - DIR=couchbase
+      - PRE_CMD="docker-compose up -d couchbase_prep"
+    - env:
+      - DIR=csv
+    - env:
+      - DIR=dynamodb
+      - PRE_CMD="docker-compose up -d dynamodb"
+    - env:
+      - DIR=elasticsearch
+    - env:
+      - DIR=file
+    - env:
+      - DIR=ftp
+      - PRE_CMD="docker-compose up -d ftp sftp"
+    - env:
+      - DIR=geode
+      - PRE_CMD="docker-compose up -d geode"
+    - env:
+      - DIR=google-cloud-pub-sub
+    - env:
+      - DIR=google-cloud-pub-sub-grpc
+      - PRE_CMD="docker-compose up -d gcloud-pubsub-emulator_prep"
+    - env:
+      - DIR=google-fcm
+    - env:
+      - DIR=hbase
+      - PRE_CMD="docker-compose up -d hbase"
+    - env:
+      - DIR=hdfs
+    - env:
+      - DIR=ironmq
+      - PRE_CMD="docker-compose up -d ironauth ironmq"
+    - env:
+      - DIR=jms
+      - PRE_CMD="docker-compose up -d ibmmq"
+    - env:
+      - DIR=json-streaming
+    - env:
+      - DIR=kinesis
+    - env:
+      - DIR=kudu
+      - PRE_CMD="docker-compose up -d kudu-master-data kudu-tserver-data kudu-master kudu-tserver"
+    - env:
+      - DIR=mongodb
+      - PRE_CMD="docker-compose up -d mongo"
+    - env:
+      - DIR=mqtt
+      - PRE_CMD="docker-compose up -d mqtt"
+    - env:
+      - DIR=mqtt-streaming
+      - PRE_CMD="docker-compose up -d mqtt"
+    - env:
+      - DIR=orientdb
+      - PRE_CMD="docker-compose up -d orientdb"
+    - env:
+      - DIR=reference
+    - env:
+      - DIR=s3
+      - PRE_CMD="docker-compose up -d minio_prep"
+    - env:
+      - DIR=spring-web
+    - env:
+      - DIR=simple-codecs
+    - env:
+      - DIR=slick
+    - env:
+      - DIR=sns
+      - PRE_CMD="docker-compose up -d amazonsns"
+    - env:
+      - DIR=solr
+    - env:
+      - DIR=sqs
+      - PRE_CMD="docker-compose up -d elasticmq"
+    - env:
+      - DIR=sse
+    - env:
+      - DIR=text
+    - env:
+      - DIR=udp
+    - env:
+      - DIR=unix-domain-socket
+    - env:
+      - DIR=xml
+
+    - stage: whitesource
+      script: git branch -f "$TRAVIS_BRANCH" && git checkout "$TRAVIS_BRANCH" && sbt whitesourceCheckPolicies whitesourceUpdate whitesourceSupported/whitesourceUpdate
+
+    - stage: publish
+      env: CMD="++2.11.12 publish"
+      name: "Publish artifacts for Scala 2.11.12"
+    - env: CMD="++2.12.7 publish"
+      name: "Publish artifacts for Scala 2.12.7"
+    - env: CMD="++2.13.0-M5 publish"
+      name: "Publish artifacts for Scala 2.13.0-M5"
+    - script: openssl aes-256-cbc -K $encrypted_bbf1dc4f2a07_key -iv $encrypted_bbf1dc4f2a07_iv -in .travis/travis_alpakka_rsa.enc -out .travis/id_rsa -d && eval "$(ssh-agent -s)" && chmod 600 .travis/id_rsa && ssh-add .travis/id_rsa && sbt -jvm-opts .jvmopts-travis docs/publishRsync
+      name: "Publish API and reference documentation"
+
+stages:
+  # runs on master commits and PRs
+  - name: check
+    if: NOT tag =~ ^v
+
+  # runs on master commits and PRs
+  - name: test
+    if: NOT tag =~ ^v
+
+  # runs on main repo master commits or version-tagged commits
+  - name: whitesource
+    if: repo = akka/alpakka AND ( ( branch = master AND type = push ) OR tag =~ ^v )
+
+  # runs on main repo master commits or version-tagged commits
+  - name: publish
+    if: repo = akka/alpakka AND ( ( branch = master AND type = push ) OR tag =~ ^v )
 
 after_failure:
   - docker-compose logs
+  - find . -name "*.log" -exec ./scripts/cat-log.sh {} \;
 
 before_cache:
   - find $HOME/.ivy2 -name "ivydata-*.properties" -print -delete
@@ -39,25 +170,20 @@ cache:
   directories:
     - $HOME/.ivy2/cache
     - $HOME/.sbt/boot
+    - $HOME/.sbt/launchers
+    - $HOME/.jabba/jdk
+  timeout: 900
 
-deploy:
-  provider: script
-  skip_cleanup: true
-  script: sbt 'set credentials += Credentials("whitesource", "whitesourcesoftware.com", "", System.getenv("WHITESOURCE_KEY"))' whitesourceCheckPolicies whitesourceUpdate && sbt -J-XX:ReservedCodeCacheSize=128m ++$TRAVIS_SCALA_VERSION publish && curl -I https://ci.lightbend.com/job/techhub-publisher/build?token=$TECH_HUB_TOKEN
-  on:
-    tags: true
-    repo: akka/alpakka
-    condition: $AKKA_SERIES = 2.5
+addons:
+  hosts:
+    # to run tests locally, these hostnames need to resolve to localhost IP
+    - hbase
 
 env:
-  matrix:
-    - AKKA_SERIES=2.5
   global:
-    # encrypt with: travis encrypt WHITESOURCE_KEY=...
-    - secure: "JcoxWiNmC0EEdl2KhEx4O8YNy/P2Mvk5fjqC700ClHPiYEsyr+3baNQGmj3AQcpjIgxvHso/8zeFsGJWKnYD3E0vn+J/6urld8vLZprQX/FPKFZgIpIKBgNogQa5V8o2mQSco72t8n1kkFLf6TNZR0T+1cmYz0himcn71rhgwqCtVDrW7zfHgXpbL67FKDUIvfVikdVMBVvcxiZHFIkHUC576LKz24wQYfbnCROGQV7uXFhYNjH0s1HXh6VzUWfEx/PuXEiXnsXSkG8jw0C6ELguLHChJqhsLVC5CaT+DHAs2YeZB04ncX17OwAYNy2RwCgSPCMSnCprBWR2QFqT9C2YZmPrlR9hHgUisHmuydLpRN7aN9BCLpLJk5jGZTwYLyabgzpSbs0SAgqSFgMp+WaWX+WhKMcrhNZvKAuz3n/lgOO6s1pZ0gCTsLtjOIfDLgjY7LxzWykDftwbyVg5OfGI9jv1eYHp3T9GWQ44KTckcQwyzfE5433MUHYk+f0eMjcxWq46rAAuc8BEpEO42+O9iHb+p2kvLUswjpVxy0+SOnxAgJYtrCm4kF8tRCFcBvC/Nim6SzOhyl2dKYMS9BVpBTe4hOMuS5xjfh1wly4TsToByg77C0o2AbW0PhhgujapRgDKcv8Qu6RC599UBthj9tTkGdctW8CCm2YZbTg="
+    # encrypt with: travis encrypt WHITESOURCE_PASSWORD=...
+    - secure: "VpRSxeqP6gXCxnYCsjylMt1xxXxI/hlj6msibKuHpstDnfPkbDMS8RnRJ/39tyjx/szELZSzAllV0VpM27JpTXlKfIT/78ZUGcljqzfnmv3uh/dWh9k2ERQX1Hr3TGFFyljIbEKHcHjvgHBJtlIRGIuvoBv0tJ98pcqS6dCeplaaJa1Ya7Q53u17GOJakhvTjrT3ASz8gF1kV4GN9XhQCUjRfQSINiT+QC+ONoHy6ztZPIDgfUskBfKgZU5P1saDLcBjzBkXDWIwbKubfJGBl3DSs2fHaWNJE5CRZNJ64Wi8Hs006zvyomIaCfbVAWtxOiLCdXxlys/YQs43RRB0pBqyvTpxH4lEwnLR5uGDH+nuBQw9efCWqsM3CDsRSH7iobjBlunKgDCfjua5/dWJ3Wm2j8WOi6C6/y/YrGwU/DrncukRtcyKj92Mu3LHk5HEMiOiIA41P2NTqalvjvoqi1zMQ5On2g55e2YMcHmQ8dCsRAgegCYB3a6GyGq7T8zkuMMljpmpQJwayrJPQKi001d3ajZZwMLcv4YW9ndVYCZD9ducZ448Uo5BCpJFDPPG+xcXrvZowCUA9JtpnyXrTcTLvFITG2egXyLOQfZ0/FX9XneMtX8qX8ysHaBX9tWiYsplo/WfbpBHy935Ag8WnGH0cYvOXuqAKKUXRVq9ANI="
     # encrypt with: travis encrypt BINTRAY_USER=...
     - secure: "DLc1v2XMWrxtbPzVfoArkSQiwzT+O7/rwT7APqoA68K5A1pwxDw5BD3sOLpd6rKbPBulmwDAAQ1am3uE6lbmymCTMe8bvA3iHWy0Jg8baK4nC46EKFLabQz4Uaoq/bs92YGW1QH12rbBPyTA7uvPpvhmb8uyUbJqjT3uyROqHhHfhll89dsPVaK0NCY9DN2K356M87z7cp1SvtfAiF8qaNjNmlOfWjIEUSO1SiiqQBjT/GJvhrrW32J4htf5CqEEYBSoN+fqTCwwdo3GpOFFq+Zh5TSoyvKyi5xo+LVq0hW2SAYTHMMB5WhLd1cvQ0bvK6FpUhyfMcON/8ad3R7paNVxLpIGEu8hsUYGsENjdXaEK4g1TurDeVekWJRYyGMCmy2cCg5yHC+Pb56qOgpM7gmZACCitLap1jXUCWI27q+7cvxuxaBb6EPiDuWGNQXHH+OkbD/s4RJO3kQfv1Si64RON8+bZ+fqOWLK+BuakYi3YMukFgPngQozX3aMZOVcEBKJZtquwewCKsNV2VGItJxrp3MDol0HhuNvdUvIf5UydZZCyJTo1DBsK49yDUj7iKOEJk5Qc5oYfEhSEKcGRZs8Yl9n/kIJUh8ZYTT+35rwD27dHgsEkPkCEGpbMP/r0JewkWH7q9FfajPIYOlEpoP6tCsdP4mBOyF1uZH7omM="
     # encrypt with: travis encrypt BINTRAY_PASS=...
     - secure: "gasjgT+qHUFPe/eMqvwD7WtzQmNw++LXmmQ6ic6VJOf/drAQckdeXIaa3rOsuoiI72xtngIUPil61+bviRf3Qgw061w65dSlrn4Pm1c4f4kOCRBQCpsg06PK2Xs40ZD/9l9e+3N0T6alwx//PFH+bUB5yEi7y/Qs1dOKtofvvtoTkGvF6GZDCMiKwpYmcEKmBbmEuyaFLd5h1N6oJ53g7dtyh1KD9gU4HXmc3QujrKSxm3YunMf68wgtTJWZf3b/OcyVTSz7/8mbvJ++GWCyVK5B8snAnKxwSNHhYysNdOoOTGhwF2dnE38Vr/NXldHnm+M2LzuBBADXLmxlW92bxv+IjuAT+HtBoPEP9I+f/eJqfirkrMRWiylWN7zcchMzHTHS54qx1JvtRyJYNFsOfzqLry/IUZoT/1tLe2vPCRE601K5pS2GEDAt/gj3BTCWpCvidgXXq4KPlj5IqeIJ5UVWSpjCCH0hZUwuUUwgSNTXFg7Ug+U4U5DjPmyla5oNj9d+RIGqWtsixB8QAs5dCgtBa0om/f8nT584iHjrpvduLpoUpUcMPyPgcJnlHNvKawnEW0JCcMxR4fJBsG3IG+6Q6Rbo17VIs/Z5hgcNQtJMVnjiIGfOFBQKYKrStAWlJWK9WTo5L5oO3sn+BZQUnuJxafoJsdArEogzfbRjovk="
-    # encrypt with travis encrypt TECH_HUB_TOKEN=...
-    - secure: "fYD0u+ipZj7h8QIwZrhXmdp4SteHxa2Er924Qm8y1KQj67mkGTrwjJaSQCv2H69HDRdfg2po4M2MuQixF0hh4amZTd388ulR+1LhAid2EZPZ5aICWaqTYUa63HMQ7zhGqAN+2bMXnOKEeJYV9LrSDZ+Ki0FpdIPdSIbYbx1KZ9DAABdi25p9XSD21/ZOajEzSiobHw9lQLQTbaMHGsY3LA1UT8/v5j3ykfTjKd3pKtqFcVeijMRA7BDPrSUvXS62dsBnZ1CS6htV621BBYox/9dzI//P6ht9U/i3gdRDHmPEmdXlB2Jooo+u8PCpHBFxTnsOhSf84KNq7888iu3dqPtqAQPL2v+eUR1oqzUXhOjUIhqSPkZWhMyDEH2SRJDn51dGDXg2coBnPLJlnkHiOS5rikejAGUNRDPIq9Xo8izyvuy3lAGtzDoO1CppFmqbk6wyapYr8WUp8wMBeuy98ENHzYVjlGWALBr2OttpkKdwGtQQEL2agzmqUTPCxV32YAv6FYhfIyu6u309tkn0lbSdPEZvr+oyNeVKCwpY5/wSzkSNcwwbk4/Jrh02T16iNv9lc/GnzSnVqdyNiJPDuIojIOAF4mY3jVrGeaefRArJGkfoA0SrMZOLsn1nX2XnuWeDPKLMJ2ki/4yeijJJIJpuYzHNoHDJhdNllZ+rQuQ="

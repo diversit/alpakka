@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.ftp;
@@ -16,7 +16,7 @@ import java.net.InetAddress;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 
-public class SftpStageTest extends SftpSupportImpl implements CommonFtpStageTest {
+public class SftpStageTest extends BaseSftpSupport implements CommonFtpStageTest {
 
   @Test
   public void listFiles() throws Exception {
@@ -44,33 +44,30 @@ public class SftpStageTest extends SftpSupportImpl implements CommonFtpStageTest
   }
 
   public Source<FtpFile, NotUsed> getBrowserSource(String basePath) throws Exception {
-    return Sftp.ls(basePath, settings());
+    return Sftp.ls(ROOT_PATH + basePath, settings());
   }
 
   public Source<ByteString, CompletionStage<IOResult>> getIOSource(String path) throws Exception {
-    return Sftp.fromPath(path, settings());
+    return Sftp.fromPath(ROOT_PATH + path, settings());
   }
 
   public Sink<ByteString, CompletionStage<IOResult>> getIOSink(String path) throws Exception {
-    return Sftp.toPath(path, settings());
+    return Sftp.toPath(ROOT_PATH + path, settings());
   }
 
   public Sink<FtpFile, CompletionStage<IOResult>> getRemoveSink() throws Exception {
     return Sftp.remove(settings());
   }
 
-  public Sink<FtpFile, CompletionStage<IOResult>> getMoveSink(Function<FtpFile, String> destinationPath) throws Exception {
-    return Sftp.move(destinationPath, settings());
+  public Sink<FtpFile, CompletionStage<IOResult>> getMoveSink(
+      Function<FtpFile, String> destinationPath) throws Exception {
+    return Sftp.move(f -> ROOT_PATH + destinationPath.apply(f), settings());
   }
 
   private SftpSettings settings() throws Exception {
-    //#create-settings
-    final SftpSettings settings = SftpSettings.create(
-            InetAddress.getByName("localhost"))
-            .withPort(getPort())
-            .withCredentials(FtpCredentials.createAnonCredentials())
-            .withStrictHostKeyChecking(false);
-    //#create-settings
-    return settings;
+    return SftpSettings.create(InetAddress.getByName(HOSTNAME))
+        .withPort(PORT)
+        .withCredentials(CREDENTIALS)
+        .withStrictHostKeyChecking(false);
   }
 }

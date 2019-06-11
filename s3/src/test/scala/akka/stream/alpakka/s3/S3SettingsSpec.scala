@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.s3
@@ -11,19 +11,19 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.OptionValues
 
 class S3SettingsSpec extends S3WireMockBase with S3ClientIntegrationSpec with OptionValues {
-  private def mkConfig(more: String): S3Settings =
-    S3Settings.apply(
+  private def mkSettings(more: String): S3Settings =
+    S3Settings(
       ConfigFactory.parseString(
         s"""
-          |akka.stream.alpakka.s3.buffer = memory
-          |akka.stream.alpakka.s3.path-style-access = false
+          |buffer = memory
+          |path-style-access = false
           |$more
         """.stripMargin
       )
     )
 
   "S3Settings" should "correctly parse config with anonymous credentials" in {
-    val settings: S3Settings = mkConfig("akka.stream.alpakka.s3.aws.credentials.provider = anon")
+    val settings: S3Settings = mkSettings("aws.credentials.provider = anon")
 
     settings.credentialsProvider.getCredentials shouldBe a[AnonymousAWSCredentials]
   }
@@ -32,8 +32,8 @@ class S3SettingsSpec extends S3WireMockBase with S3ClientIntegrationSpec with Op
     val testKi: String = "testki"
     val testSk: String = "testsk"
 
-    val settings: S3Settings = mkConfig(
-      s"""akka.stream.alpakka.s3.aws.credentials {
+    val settings: S3Settings = mkSettings(
+      s"""aws.credentials {
         | provider = static
         | access-key-id = $testKi
         | secret-access-key = $testSk
@@ -50,8 +50,8 @@ class S3SettingsSpec extends S3WireMockBase with S3ClientIntegrationSpec with Op
     val testSk: String = "testsk"
     val testTok: String = "testtok"
 
-    val settings: S3Settings = mkConfig(
-      s"""akka.stream.alpakka.s3.aws.credentials {
+    val settings: S3Settings = mkSettings(
+      s"""aws.credentials {
          | provider = static
          | access-key-id = $testKi
          | secret-access-key = $testSk
@@ -68,35 +68,22 @@ class S3SettingsSpec extends S3WireMockBase with S3ClientIntegrationSpec with Op
   }
 
   it should "correctly parse config with default credentials" in {
-    val settings: S3Settings = mkConfig(
-      "akka.stream.alpakka.s3.aws.credentials.provider = default"
+    val settings: S3Settings = mkSettings(
+      "aws.credentials.provider = default"
     )
     settings.credentialsProvider shouldBe a[DefaultAWSCredentialsProviderChain]
     settings.endpointUrl shouldBe 'empty
   }
 
   it should "correctly fallback to default credentials provider" in {
-    val settings: S3Settings = mkConfig(
+    val settings: S3Settings = mkSettings(
       "" // no credentials section
     )
     settings.credentialsProvider shouldBe a[DefaultAWSCredentialsProviderChain]
   }
 
-  it should "fall back to old / deprecated credentials if new config is empty, but old is present" in {
-    val testAki = "test-aki"
-    val testSak = "test-sak"
-    val settings = mkConfig(
-      s"""akka.stream.alpakka.s3.aws.access-key-id = $testAki
-         |akka.stream.alpakka.s3.aws.secret-access-key = $testSak""".stripMargin
-    )
-    settings.credentialsProvider shouldBe a[AWSStaticCredentialsProvider]
-    settings.credentialsProvider.getCredentials shouldBe a[BasicAWSCredentials]
-    settings.credentialsProvider.getCredentials.getAWSAccessKeyId shouldBe testAki
-    settings.credentialsProvider.getCredentials.getAWSSecretKey shouldBe testSak
-  }
-
   it should "use default region provider chain by default" in {
-    val settings: S3Settings = mkConfig(
+    val settings: S3Settings = mkSettings(
       "" // no credentials section
     )
     settings.s3RegionProvider shouldBe a[DefaultAwsRegionProviderChain]
@@ -105,31 +92,31 @@ class S3SettingsSpec extends S3WireMockBase with S3ClientIntegrationSpec with Op
   it should "use given region when using static region provider" in {
     val otherRegion = "testRegion"
 
-    val settings: S3Settings = mkConfig(
+    val settings: S3Settings = mkSettings(
       s"""
-         |akka.stream.alpakka.s3.aws.region.provider = static
-         |akka.stream.alpakka.s3.aws.region.default-region = $otherRegion
+         |aws.region.provider = static
+         |aws.region.default-region = $otherRegion
          |""".stripMargin
     )
     settings.s3RegionProvider.getRegion shouldBe otherRegion
   }
 
   it should "use default region provider when set in configuration" in {
-    val settings: S3Settings = mkConfig(
-      "akka.stream.alpakka.s3.aws.region.provider = default" // no credentials section
+    val settings: S3Settings = mkSettings(
+      "aws.region.provider = default" // no credentials section
     )
     settings.s3RegionProvider shouldBe a[DefaultAwsRegionProviderChain]
   }
 
   it should "properly handle a missing endpoint url" in {
-    val settings: S3Settings = mkConfig("")
+    val settings: S3Settings = mkSettings("")
     settings.endpointUrl shouldBe 'empty
   }
 
   it should "properly handle a null endpoint url" in {
-    val settings: S3Settings = mkConfig(
+    val settings: S3Settings = mkSettings(
       s"""
-         |akka.stream.alpakka.s3.endpoint-url = null
+         |endpoint-url = null
         """.stripMargin
     )
     settings.endpointUrl shouldBe 'empty
@@ -138,30 +125,26 @@ class S3SettingsSpec extends S3WireMockBase with S3ClientIntegrationSpec with Op
   it should "instantiate with a custom endpoint uri" in {
     val endpointUrl = "http://localhost:9000"
 
-    val settings: S3Settings = mkConfig(
+    val settings: S3Settings = mkSettings(
       s"""
-           |akka.stream.alpakka.s3.endpoint-url = "$endpointUrl"
+           |endpoint-url = "$endpointUrl"
         """.stripMargin
     )
     settings.endpointUrl.value shouldEqual endpointUrl
   }
 
   it should "be able to instantiate using custom config prefix" in {
-    val myS3ConfigPrefix = "my-s3-config"
     val otherRegion = "testRegion"
     val endpointUrl = "http://localhost:9000"
 
-    val settings: S3Settings = S3Settings.apply(
-      ConfigFactory.parseString(
-        s"""
-           |$myS3ConfigPrefix.aws.region.provider = static
-           |$myS3ConfigPrefix.aws.region.default-region = $otherRegion
-           |$myS3ConfigPrefix.buffer = memory
-           |$myS3ConfigPrefix.path-style-access = true
-           |$myS3ConfigPrefix.endpoint-url = "$endpointUrl"
-        """.stripMargin
-      ),
-      myS3ConfigPrefix
+    val settings: S3Settings = mkSettings(
+      s"""
+           |aws.region.provider = static
+           |aws.region.default-region = $otherRegion
+           |buffer = memory
+           |path-style-access = true
+           |endpoint-url = "$endpointUrl"
+        """
     )
 
     settings.pathStyleAccess shouldBe true
@@ -169,4 +152,54 @@ class S3SettingsSpec extends S3WireMockBase with S3ClientIntegrationSpec with Op
     settings.endpointUrl.value shouldEqual endpointUrl
   }
 
+  it should "instantiate with the list bucket api version 2 by default" in {
+    val settings: S3Settings = mkSettings("")
+    settings.listBucketApiVersion shouldEqual ApiVersion.ListBucketVersion2
+  }
+
+  it should "instantiate with the list bucket api version 1 if list-bucket-api-version is set to 1" in {
+    val settings: S3Settings = mkSettings("list-bucket-api-version = 1")
+    settings.listBucketApiVersion shouldEqual ApiVersion.ListBucketVersion1
+  }
+
+  it should "instantiate with the list bucket api version 2 if list-bucket-api-version is set to a number that is neither 1 or 2" in {
+    val settings: S3Settings = mkSettings("list-bucket-api-version = 0")
+    settings.listBucketApiVersion shouldEqual ApiVersion.ListBucketVersion2
+  }
+
+  it should "instantiate with the list bucket api version 2 if list-bucket-api-version is set to a value that is not a number" in {
+    val settings: S3Settings = mkSettings("list-bucket-api-version = 'version 1'")
+    settings.listBucketApiVersion shouldEqual ApiVersion.ListBucketVersion2
+  }
+
+  it should "parse forward proxy without credentials" in {
+    val settings = mkSettings("""
+        |forward-proxy {
+        |  host = proxy-host
+        |  port = 1337
+        |}
+      """.stripMargin)
+
+    settings.forwardProxy.value.host shouldEqual "proxy-host"
+    settings.forwardProxy.value.port shouldEqual 1337
+    settings.forwardProxy.value.credentials shouldBe 'empty
+  }
+
+  it should "parse forward proxy with credentials" in {
+    val settings = mkSettings("""
+                                |forward-proxy {
+                                |  host = proxy-host
+                                |  port = 1337
+                                |  credentials {
+                                |    username = knock-knock
+                                |    password = whos-there
+                                |  }
+                                |}
+                              """.stripMargin)
+
+    settings.forwardProxy.value.host shouldEqual "proxy-host"
+    settings.forwardProxy.value.port shouldEqual 1337
+    settings.forwardProxy.value.credentials.value.username shouldEqual "knock-knock"
+    settings.forwardProxy.value.credentials.value.password shouldEqual "whos-there"
+  }
 }

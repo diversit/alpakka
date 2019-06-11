@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.ftp;
@@ -15,12 +15,7 @@ import java.net.InetAddress;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 
-public class FtpsStageTest extends FtpsSupportImpl implements CommonFtpStageTest {
-
-  public FtpsStageTest() {
-    setAuthValue("TLS");
-    setUseImplicit(false);
-  }
+public class FtpsStageTest extends BaseFtpSupport implements CommonFtpStageTest {
 
   @Test
   public void listFiles() throws Exception {
@@ -63,20 +58,16 @@ public class FtpsStageTest extends FtpsSupportImpl implements CommonFtpStageTest
     return Ftps.remove(settings());
   }
 
-  public Sink<FtpFile, CompletionStage<IOResult>> getMoveSink(Function<FtpFile, String> destinationPath) throws Exception {
+  public Sink<FtpFile, CompletionStage<IOResult>> getMoveSink(
+      Function<FtpFile, String> destinationPath) throws Exception {
     return Ftps.move(destinationPath, settings());
   }
 
   private FtpsSettings settings() throws Exception {
-    //#create-settings
-    final FtpsSettings settings = new FtpsSettings(
-            InetAddress.getByName("localhost"),
-            getPort(),
-            FtpCredentials.createAnonCredentials(),
-            false, // binary
-            true   // passiveMode
-    );
-    //#create-settings
-    return settings;
+    return FtpsSettings.create(InetAddress.getByName(HOSTNAME))
+        .withPort(PORT)
+        .withCredentials(CREDENTIALS)
+        .withBinary(false)
+        .withPassiveMode(true);
   }
 }

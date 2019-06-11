@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.dynamodb
@@ -19,6 +19,12 @@ trait TestOps {
   def keyMap(hash: String, sort: Int): Map[String, AttributeValue] = Map(
     keyCol -> S(hash),
     sortCol -> N(sort)
+  )
+
+  def keyEQ(hash: String): Map[String, Condition] = Map(
+    keyCol -> new Condition()
+      .withComparisonOperator(ComparisonOperator.EQ)
+      .withAttributeValueList(S(hash))
   )
 
   object common {
@@ -76,6 +82,11 @@ object ItemSpecOps extends TestOps {
     ).asJava
   )
 
+  val queryItemsRequest = new QueryRequest()
+    .withTableName(tableName)
+    .withKeyConditions(keyEQ("B").asJava)
+    .withLimit(1)
+
   val deleteItemRequest = new DeleteItemRequest().withTableName(tableName).withKey(keyMap("A", 0).asJava)
 
   def test7PutItemRequest(n: Int) =
@@ -86,6 +97,31 @@ object ItemSpecOps extends TestOps {
       .withTableName(tableName)
       .withKeyConditionExpression(s"$keyCol = :k")
       .withExpressionAttributeValues(Map(":k" -> S("A")).asJava)
+
+  val test8Data = "test8Data"
+
+  val transactPutItemsRequest = new TransactWriteItemsRequest().withTransactItems(
+    List(
+      new TransactWriteItem()
+        .withPut(new Put().withTableName(tableName).withItem((keyMap("C", 0) + ("data" -> S(test8Data))).asJava)),
+      new TransactWriteItem()
+        .withPut(new Put().withTableName(tableName).withItem((keyMap("C", 1) + ("data" -> S(test8Data))).asJava))
+    ).asJava
+  )
+
+  val transactGetItemsRequest = new TransactGetItemsRequest().withTransactItems(
+    List(
+      new TransactGetItem().withGet(new Get().withTableName(tableName).withKey(keyMap("C", 0).asJava)),
+      new TransactGetItem().withGet(new Get().withTableName(tableName).withKey(keyMap("C", 1).asJava))
+    ).asJava
+  )
+
+  val transactDeleteItemsRequest = new TransactWriteItemsRequest().withTransactItems(
+    List(
+      new TransactWriteItem().withDelete(new Delete().withTableName(tableName).withKey(keyMap("C", 0).asJava)),
+      new TransactWriteItem().withDelete(new Delete().withTableName(tableName).withKey(keyMap("C", 1).asJava))
+    ).asJava
+  )
 
   val deleteTableRequest = common.deleteTableRequest
 

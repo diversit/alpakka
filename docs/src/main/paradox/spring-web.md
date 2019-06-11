@@ -9,19 +9,21 @@ detaching these types from RS and allows for a painless migration to [`java.util
 
 This Alpakka module makes it possible to directly return a `Source` in your Spring Web endpoints.
 
-
-### Reported issues
-
-[Tagged issues at Github](https://github.com/akka/alpakka/labels/p%3Aspring-web)
+@@project-info{ projectId="spring-web" }
 
 
 ## Artifacts
 
 @@dependency [sbt,Maven,Gradle] {
   group=com.lightbend.akka
-  artifact=akka-stream-alpakka-spring-web_$scalaBinaryVersion$
-  version=$version$
+  artifact=akka-stream-alpakka-spring-web_$scala.binary.version$
+  version=$project.version$
 }
+
+The table below shows direct dependencies of this module and the second tab shows all libraries it depends on transitively.
+
+@@dependencies { projectId="spring-web" }
+
 
 ## Usage
 
@@ -31,14 +33,14 @@ framework, which means that Spring is made aware of Sources and Sinks etc.
 All you need to do is include the above dependency (`akka-stream-alpakka-spring-web`), start your app as usual:
 
 Java
-: @@snip ($alpakka$/spring-web/src/test/java/akka/stream/alpakka/spring/web/DemoApplication.java) { #use }
+: @@snip [snip](/spring-web/src/test/java/docs/javadsl/DemoApplication.java) { #use }
 
 
 And you'll be able to return Akka Streams in HTTP endpoints directly:
 
 
 Java
-: @@snip ($alpakka$/spring-web/src/test/java/akka/stream/alpakka/spring/web/SampleController.java) { #use }
+: @@snip [snip](/spring-web/src/test/java/docs/javadsl/SampleController.java) { #use }
 
 Both `javadsl` and `scaladsl` Akka Stream types are supported.
 
@@ -50,7 +52,7 @@ to adapt those types in your applications as well.
 The automatically enabled configuration is as follows:
 
 Java
-: @@snip ($alpakka$/spring-web/src/main/java/akka/stream/alpakka/spring/web/SpringWebAkkaStreamsConfiguration.java) { #configure }
+: @@snip [snip](/spring-web/src/main/java/akka/stream/alpakka/spring/web/SpringWebAkkaStreamsConfiguration.java) { #configure }
 
 In case you'd like to manually configure it slightly differently.
 

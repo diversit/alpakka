@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.ftp;
@@ -15,7 +15,7 @@ import java.net.InetAddress;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 
-public class FtpStageTest extends PlainFtpSupportImpl implements CommonFtpStageTest {
+public class FtpStageTest extends BaseFtpSupport implements CommonFtpStageTest {
 
   @Test
   public void listFiles() throws Exception {
@@ -58,18 +58,16 @@ public class FtpStageTest extends PlainFtpSupportImpl implements CommonFtpStageT
     return Ftp.remove(settings());
   }
 
-  public Sink<FtpFile, CompletionStage<IOResult>> getMoveSink(Function<FtpFile, String> destinationPath) throws Exception {
+  public Sink<FtpFile, CompletionStage<IOResult>> getMoveSink(
+      Function<FtpFile, String> destinationPath) throws Exception {
     return Ftp.move(destinationPath, settings());
   }
 
   private FtpSettings settings() throws Exception {
-    final FtpSettings settings = new FtpSettings(
-            InetAddress.getByName("localhost"),
-            getPort(),
-            FtpCredentials.createAnonCredentials(),
-            false, // binary
-            true   // passiveMode
-    );
-    return settings;
+    return FtpSettings.create(InetAddress.getByName(HOSTNAME))
+        .withPort(PORT)
+        .withCredentials(CREDENTIALS)
+        .withBinary(false)
+        .withPassiveMode(true);
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.kinesis.scaladsl
@@ -8,26 +8,36 @@ import java.nio.ByteBuffer
 
 import akka.NotUsed
 import akka.stream.ThrottleMode
-import akka.stream.alpakka.kinesis.{KinesisFlowSettings, KinesisFlowStage}
+import akka.stream.alpakka.kinesis.KinesisFlowSettings
+import akka.stream.alpakka.kinesis.impl.KinesisFlowStage
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
 import com.amazonaws.services.kinesis.AmazonKinesisAsync
 import com.amazonaws.services.kinesis.model.{PutRecordsRequestEntry, PutRecordsResultEntry}
 
 import scala.collection.immutable.Queue
-import scala.collection.JavaConverters._
-import scala.collection.immutable
 import scala.concurrent.duration._
-import scala.language.postfixOps
 
 object KinesisFlow {
 
-  def apply(streamName: String, settings: KinesisFlowSettings = KinesisFlowSettings.defaultInstance)(
+  def apply(streamName: String, settings: KinesisFlowSettings = KinesisFlowSettings.Defaults)(
       implicit kinesisClient: AmazonKinesisAsync
   ): Flow[PutRecordsRequestEntry, PutRecordsResultEntry, NotUsed] =
     Flow[PutRecordsRequestEntry]
-      .throttle(settings.maxRecordsPerSecond, 1 second, settings.maxRecordsPerSecond, ThrottleMode.Shaping)
-      .throttle(settings.maxBytesPerSecond, 1 second, settings.maxBytesPerSecond, getByteSize, ThrottleMode.Shaping)
+      .map((_, ()))
+      .via(withUserContext(streamName, settings))
+      .map(_._1)
+
+  def withUserContext[T](streamName: String, settings: KinesisFlowSettings = KinesisFlowSettings.Defaults)(
+      implicit kinesisClient: AmazonKinesisAsync
+  ): Flow[(PutRecordsRequestEntry, T), (PutRecordsResultEntry, T), NotUsed] =
+    Flow[(PutRecordsRequestEntry, T)]
+      .throttle(settings.maxRecordsPerSecond, 1.second, settings.maxRecordsPerSecond, ThrottleMode.Shaping)
+      .throttle(settings.maxBytesPerSecond,
+                1.second,
+                settings.maxBytesPerSecond,
+                getPayloadByteSize,
+                ThrottleMode.Shaping)
       .batch(settings.maxBatchSize, Queue(_))(_ :+ _)
       .via(
         new KinesisFlowStage(
@@ -38,15 +48,15 @@ object KinesisFlow {
         )
       )
       .mapAsync(settings.parallelism)(identity)
-      .mapConcat(_.getRecords.asScala.to[immutable.Iterable])
-      .filter(_.getErrorCode == null)
+      .mapConcat(identity)
 
-  private def getByteSize(record: PutRecordsRequestEntry): Int =
-    record.getPartitionKey.length + record.getData.position
+  private def getPayloadByteSize[T](record: (PutRecordsRequestEntry, T)): Int = record match {
+    case (request, _) => request.getPartitionKey.length + request.getData.position()
+  }
 
   def byPartitionAndData(
       streamName: String,
-      settings: KinesisFlowSettings = KinesisFlowSettings.defaultInstance
+      settings: KinesisFlowSettings = KinesisFlowSettings.Defaults
   )(
       implicit kinesisClient: AmazonKinesisAsync
   ): Flow[(String, ByteBuffer), PutRecordsResultEntry, NotUsed] =
@@ -59,9 +69,9 @@ object KinesisFlow {
       }
       .via(apply(streamName, settings))
 
-  def byParititonAndBytes(
+  def byPartitionAndBytes(
       streamName: String,
-      settings: KinesisFlowSettings = KinesisFlowSettings.defaultInstance
+      settings: KinesisFlowSettings = KinesisFlowSettings.Defaults
   )(
       implicit kinesisClient: AmazonKinesisAsync
   ): Flow[(String, ByteString), PutRecordsResultEntry, NotUsed] =

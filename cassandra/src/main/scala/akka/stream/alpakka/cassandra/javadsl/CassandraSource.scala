@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.cassandra.javadsl
@@ -7,12 +7,14 @@ package akka.stream.alpakka.cassandra.javadsl
 import java.util.concurrent.CompletableFuture
 
 import akka.NotUsed
-import akka.stream.alpakka.cassandra.CassandraSourceStage
+import akka.annotation.ApiMayChange
+import akka.stream.alpakka.cassandra.impl.CassandraSourceStage
 import akka.stream.javadsl.Source
 import com.datastax.driver.core.{Row, Session, Statement}
 
 import scala.concurrent.Future
 
+@ApiMayChange // https://github.com/akka/alpakka/issues/1213
 object CassandraSource {
 
   /**

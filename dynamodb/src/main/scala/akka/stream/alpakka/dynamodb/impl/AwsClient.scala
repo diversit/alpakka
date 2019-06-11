@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.dynamodb.impl
@@ -9,21 +9,26 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import akka.NotUsed
 import akka.actor.ActorSystem
+import akka.annotation.InternalApi
 import akka.http.scaladsl.Http.HostConnectionPool
 import akka.http.scaladsl.model.{ContentType, HttpEntity, _}
-import akka.stream.alpakka.dynamodb.AwsOp
 import akka.stream.alpakka.dynamodb.impl.AwsClient.{AwsConnect, AwsRequestMetadata}
+import akka.stream.alpakka.dynamodb.{AwsClientSettings, AwsOp}
 import akka.stream.scaladsl.Flow
 import akka.stream.{ActorAttributes, Materializer, Supervision}
-import com.amazonaws.auth.{AWS4Signer, DefaultAWSCredentialsProviderChain}
+import com.amazonaws.auth.AWS4Signer
 import com.amazonaws.http.{HttpMethodName, HttpResponseHandler, HttpResponse => AWSHttpResponse}
 import com.amazonaws.{DefaultRequest, HttpMethod => _, _}
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success, Try}
 import scala.language.implicitConversions
+import scala.util.{Failure, Success, Try}
 
-private[alpakka] object AwsClient {
+/**
+ * INTERNAL API
+ */
+@InternalApi
+private[dynamodb] object AwsClient {
 
   case class AwsRequestMetadata(id: Long, op: AwsOp)
 
@@ -32,7 +37,11 @@ private[alpakka] object AwsClient {
 
 }
 
-private[alpakka] trait AwsClient[S <: ClientSettings] {
+/**
+ * INTERNAL API
+ */
+@InternalApi
+private[dynamodb] trait AwsClient[S <: AwsClientSettings] {
 
   protected implicit def system: ActorSystem
 
@@ -46,8 +55,10 @@ private[alpakka] trait AwsClient[S <: ClientSettings] {
   protected val defaultContentType: ContentType
   protected val errorResponseHandler: HttpResponseHandler[AmazonServiceException]
 
+  protected def url: String = s"https://${settings.host}/"
+
   private val requestId = new AtomicInteger()
-  private val credentials = new DefaultAWSCredentialsProviderChain()
+  private val credentials = settings.credentialsProvider
 
   private lazy val signer = {
     val s = new AWS4Signer()
@@ -66,13 +77,11 @@ private[alpakka] trait AwsClient[S <: ClientSettings] {
     case HttpMethodName.PATCH => HttpMethods.PATCH
   }
 
-  private val url = s"https://${settings.host}/"
-
   private val signableUrl = Uri(url)
 
   private val uri = new java.net.URI(url)
 
-  private val decider: Supervision.Decider = { case _ => Supervision.Stop }
+  private val decider: Supervision.Decider = _ => Supervision.Stop
 
   def flow[Op <: AwsOp]: Flow[Op, Op#B, NotUsed] =
     Flow[Op]
@@ -80,7 +89,7 @@ private[alpakka] trait AwsClient[S <: ClientSettings] {
       .via(connection)
       .mapAsync(settings.parallelism) {
         case (Success(response), i) => toAwsResult(response, i)
-        case (Failure(ex), i) => Future.failed(ex)
+        case (Failure(ex), _) => Future.failed(ex)
       }
       .withAttributes(ActorAttributes.supervisionStrategy(decider))
       .map(_.asInstanceOf[Op#B])
@@ -96,10 +105,10 @@ private[alpakka] trait AwsClient[S <: ClientSettings] {
     val body = read(original.getContent)
 
     val tokenHeader: List[headers.RawHeader] = {
-      credentials.getCredentials() match {
-        case sessionCredentials: auth.AWSSessionCredentials =>
+      credentials.getCredentials match {
+        case _: auth.AWSSessionCredentials =>
           Some(headers.RawHeader("x-amz-security-token", amzHeaders.get("X-Amz-Security-Token")))
-        case other =>
+        case _ =>
           None
       }
     }.toList
@@ -108,10 +117,10 @@ private[alpakka] trait AwsClient[S <: ClientSettings] {
       uri = signableUrl,
       method = original.getHttpMethod,
       headers = List(
-        headers.RawHeader("x-amz-date", amzHeaders.get("X-Amz-Date")),
-        headers.RawHeader("authorization", amzHeaders.get("Authorization")),
-        headers.RawHeader("x-amz-target", amzHeaders.get("X-Amz-Target"))
-      ) ++ tokenHeader,
+          headers.RawHeader("x-amz-date", amzHeaders.get("X-Amz-Date")),
+          headers.RawHeader("authorization", amzHeaders.get("Authorization")),
+          headers.RawHeader("x-amz-target", amzHeaders.get("X-Amz-Target"))
+        ) ++ tokenHeader,
       entity = HttpEntity(defaultContentType, body)
     )
 

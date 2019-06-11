@@ -1,11 +1,12 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.csv
 
 import java.nio.charset.{StandardCharsets, UnsupportedCharsetException}
 
+import akka.stream.alpakka.csv.impl.CsvParser
 import akka.stream.alpakka.csv.scaladsl.ByteOrderMark
 import akka.util.ByteString
 import org.scalatest.{Matchers, OptionValues, WordSpec}
@@ -58,6 +59,11 @@ class CsvParserSpec extends WordSpec with Matchers with OptionValues {
       expectInOut("\r\n", List(""))
     }
 
+    "parse an empty line with CR, CR, LF into a single column" in {
+      // https://github.com/akka/alpakka/issues/987
+      expectInOut("\r\r\n", List(""))
+    }
+
     "parse UTF-8 chars unchanged" in {
       expectInOut("ℵ,a,ñÅë,อักษรไทย\n", List("ℵ", "a", "ñÅë", "อักษรไทย"))
     }
@@ -77,6 +83,9 @@ class CsvParserSpec extends WordSpec with Matchers with OptionValues {
 
     "parse double escape chars into one escape char" in {
       expectInOut("a,\\\\,c\n", List("a", "\\", "c"))
+      expectInOut("a,b\\\\c,d\n", List("a", "b\\c", "d"))
+      expectInOut("a\\\\b,c,d\n", List("a\\b", "c", "d"))
+      expectInOut("\\\\,a,b\n", List("\\", "a", "b"))
     }
 
     "parse quoted escape chars into one escape char" in {
@@ -87,16 +96,20 @@ class CsvParserSpec extends WordSpec with Matchers with OptionValues {
       expectInOut("a,\\,,c\n", List("a", ",", "c"))
     }
 
+    "parse escape char into itself if not followed by escape or delimiter" in {
+      expectInOut("a,\\b,\"\\-c\"\n", List("a", "\\b", "\\-c"))
+    }
+
     "fail on escaped quote as quotes are escaped by doubled quote chars" in {
       val in = ByteString("a,\\\",c\n")
       val parser = new CsvParser(',', '"', '\\', maximumLineLength)
       parser.offer(in)
       val exception = the[MalformedCsvException] thrownBy {
-        parser.poll(requireLineEnd = true)
-      }
-      exception.getMessage should be("wrong escaping at 1:2, only escape or delimiter may be escaped")
+          parser.poll(requireLineEnd = true)
+        }
+      exception.getMessage should be("wrong escaping at 1:3, quote is escaped as \"\"")
       exception.getLineNo should be(1)
-      exception.getBytePos should be(2)
+      exception.getBytePos should be(3)
     }
 
     "fail on escape at line end" in {
@@ -104,9 +117,9 @@ class CsvParserSpec extends WordSpec with Matchers with OptionValues {
       val parser = new CsvParser(',', '"', '\\', maximumLineLength)
       parser.offer(in)
       val exception = the[MalformedCsvException] thrownBy {
-        parser.poll(requireLineEnd = true)
-      }
-      exception.getMessage should be("wrong escaping at 1:2, no character after escape")
+          parser.poll(requireLineEnd = false)
+        }
+      exception.getMessage should be("wrong escaping at 1:3, no character after escape")
     }
 
     "fail on escape within field at line end" in {
@@ -114,9 +127,9 @@ class CsvParserSpec extends WordSpec with Matchers with OptionValues {
       val parser = new CsvParser(',', '"', '\\', maximumLineLength)
       parser.offer(in)
       val exception = the[MalformedCsvException] thrownBy {
-        parser.poll(requireLineEnd = true)
-      }
-      exception.getMessage should be("wrong escaping at 1:3, no character after escape")
+          parser.poll(requireLineEnd = false)
+        }
+      exception.getMessage should be("wrong escaping at 1:4, no character after escape")
     }
 
     "fail on escape within quoted field at line end" in {
@@ -124,9 +137,9 @@ class CsvParserSpec extends WordSpec with Matchers with OptionValues {
       val parser = new CsvParser(',', '"', '\\', maximumLineLength)
       parser.offer(in)
       val exception = the[MalformedCsvException] thrownBy {
-        parser.poll(requireLineEnd = true)
-      }
-      exception.getMessage should be("wrong escaping at 1:3, no character after escape")
+          parser.poll(requireLineEnd = false)
+        }
+      exception.getMessage should be("wrong escaping at 1:4, no character after escape")
     }
 
     "parse escaped escape within quotes into quote" in {
@@ -178,6 +191,90 @@ class CsvParserSpec extends WordSpec with Matchers with OptionValues {
 
     "quoted values may contain CR, LF" in {
       expectInOut("one,\"two\r\ntwo\",three\n", List("one", "two\r\ntwo", "three"))
+      expectInOut("one,\"two\r\ntwo\",three", List("one", "two\r\ntwo", "three"))(requireLineEnd = false)
+    }
+
+    "quoted values may contain CR, LF in last field" in {
+      expectInOut("one,\"two\r\ntwo\"", List("one", "two\r\ntwo"))(requireLineEnd = false)
+    }
+
+    "handle escaping split over two inputs" in {
+      splitInput("\\", "\\A,B", List("\\A", "B"))
+      splitInput("A\\", "\\A,B", List("A\\A", "B"))
+      splitInput("A,\\", "\\B", List("A", "\\B"))
+      splitInput("A,B\\", "\\", List("A", "B\\"))
+    }
+
+    "handle escaping withing quotes, split over two inputs" in {
+      splitInput("\"\\", "\\A\",B", List("\\A", "B"))
+      splitInput("\"A\\", "\\A\",B", List("A\\A", "B"))
+      splitInput("A,\"\\", "\\B\"", List("A", "\\B"))
+      splitInput("A,\"B\\", "\\\"", List("A", "B\\"))
+    }
+
+    "handle double quotes split over two inputs" in {
+      splitInput("\"\"", "\"A\",B", List("\"A", "B"))
+      splitInput("\"A\"", "\"\",B", List("A\"", "B"))
+      splitInput("\"A\"", "\"A\",B", List("A\"A", "B"))
+      splitInput("A,\"\"", "\"B\"", List("A", "\"B"))
+      splitInput("A,\"B\"", "\"B\"", List("A", "B\"B"))
+      splitInput("A,\"B\"", "\"\"", List("A", "B\""))
+    }
+
+    def splitInput(in1: String, in2: String, expect: List[String]) = {
+      val parser = new CsvParser(delimiter = ',', quoteChar = '"', escapeChar = '\\', maximumLineLength)
+      parser.offer(ByteString(in1))
+      parser.poll(requireLineEnd = true) should be('empty)
+      parser.offer(ByteString(in2) ++ ByteString("\n"))
+      parser.poll(requireLineEnd = true).value.map(_.utf8String) should be(expect)
+      parser.poll(requireLineEnd = true) should be('empty)
+    }
+
+    "fail for unclosed quotes at end of input" in {
+      val parser = new CsvParser(delimiter = ',', quoteChar = '"', escapeChar = '\\', maximumLineLength)
+      parser.offer(ByteString("\"A\""))
+      parser.poll(requireLineEnd = true) should be('empty)
+      parser.offer(ByteString("\",B"))
+      parser.poll(requireLineEnd = true) should be('empty)
+      val exception = the[MalformedCsvException] thrownBy {
+          parser.poll(requireLineEnd = false)
+        }
+      exception.getMessage should be("unclosed quote at end of input 1:6, no matching quote found")
+    }
+
+    "accept delimiter as last input" in {
+      val parser = new CsvParser(delimiter = ',', quoteChar = '"', escapeChar = '\\', maximumLineLength)
+      parser.offer(ByteString("A,B\nA,"))
+      parser.poll(requireLineEnd = false).value.map(_.utf8String) should be(List("A", "B"))
+      parser.poll(requireLineEnd = false).value shouldBe List(ByteString("A"), ByteString.empty)
+    }
+
+    "accept delimiter as last input on first line" in {
+      val parser = new CsvParser(delimiter = ',', quoteChar = '"', escapeChar = '\\', maximumLineLength)
+      parser.offer(ByteString("A,"))
+      parser.poll(requireLineEnd = false).value shouldBe List(ByteString("A"), ByteString.empty)
+    }
+
+    "detect line ending correctly if input is split between CR & LF" in {
+      val parser = new CsvParser(delimiter = ',', quoteChar = '"', escapeChar = '\\', maximumLineLength)
+      parser.offer(ByteString("A,D\r"))
+      parser.poll(requireLineEnd = true) should be('empty)
+      parser.offer(ByteString("\nB,E\r\n"))
+      parser.poll(requireLineEnd = true).value.map(_.utf8String) should be(List("A", "D"))
+      parser.poll(requireLineEnd = true).value.map(_.utf8String) should be(List("B", "E"))
+      parser.poll(requireLineEnd = true) should be('empty)
+    }
+
+    "detect line ending correctly if input is split between CR, CR & LF" in {
+      val parser = new CsvParser(delimiter = ',', quoteChar = '"', escapeChar = '\\', maximumLineLength)
+      parser.offer(ByteString("A,D\r"))
+      parser.poll(requireLineEnd = true) should be('empty)
+      parser.offer(ByteString("\r"))
+      parser.poll(requireLineEnd = true) should be('empty)
+      parser.offer(ByteString("\nB,E\r\n"))
+      parser.poll(requireLineEnd = true).value.map(_.utf8String) should be(List("A", "D"))
+      parser.poll(requireLineEnd = true).value.map(_.utf8String) should be(List("B", "E"))
+      parser.poll(requireLineEnd = true) should be('empty)
     }
 
     "take double \" as single" in {
@@ -196,8 +293,8 @@ class CsvParserSpec extends WordSpec with Matchers with OptionValues {
       parser.offer(in)
       parser.poll(requireLineEnd = true)
       val exception = the[MalformedCsvException] thrownBy {
-        parser.poll(requireLineEnd = true)
-      }
+          parser.poll(requireLineEnd = true)
+        }
       exception.getMessage should be("no line end encountered within 11 bytes on line 2")
     }
 

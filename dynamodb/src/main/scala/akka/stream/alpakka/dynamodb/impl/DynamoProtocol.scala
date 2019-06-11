@@ -1,16 +1,21 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.dynamodb.impl
 
+import akka.annotation.InternalApi
 import com.amazonaws.AmazonServiceException
 import com.amazonaws.http.HttpResponseHandler
 import com.amazonaws.protocol.json._
 import com.amazonaws.services.dynamodbv2.model._
 import com.amazonaws.services.dynamodbv2.model.transform._
 
-private[alpakka] trait DynamoProtocol {
+/**
+ * INTERNAL API
+ */
+@InternalApi
+private[dynamodb] trait DynamoProtocol {
 
   val meta = new JsonOperationMetadata().withPayloadJson(true)
 
@@ -58,6 +63,8 @@ private[alpakka] trait DynamoProtocol {
   protected val putItemM = new PutItemRequestProtocolMarshaller(protocol)
   protected val queryM = new QueryRequestProtocolMarshaller(protocol)
   protected val scanM = new ScanRequestProtocolMarshaller(protocol)
+  protected val transactGetItemsM = new TransactGetItemsRequestProtocolMarshaller(protocol)
+  protected val transactWriteItemsM = new TransactWriteItemsRequestProtocolMarshaller(protocol)
   protected val updateItemM = new UpdateItemRequestProtocolMarshaller(protocol)
   protected val updateTableM = new UpdateTableRequestProtocolMarshaller(protocol)
   protected val updateTimeToLiveM = new UpdateTimeToLiveRequestProtocolMarshaller(protocol)
@@ -76,6 +83,8 @@ private[alpakka] trait DynamoProtocol {
   protected val putItemU = protocol.createResponseHandler(meta, new PutItemResultJsonUnmarshaller)
   protected val queryU = protocol.createResponseHandler(meta, new QueryResultJsonUnmarshaller)
   protected val scanU = protocol.createResponseHandler(meta, new ScanResultJsonUnmarshaller)
+  protected val transactGetItemsU = protocol.createResponseHandler(meta, new TransactGetItemsResultJsonUnmarshaller)
+  protected val transactWriteItemsU = protocol.createResponseHandler(meta, new TransactWriteItemsResultJsonUnmarshaller)
   protected val updateItemU = protocol.createResponseHandler(meta, new UpdateItemResultJsonUnmarshaller)
   protected val updateTableU = protocol.createResponseHandler(meta, new UpdateTableResultJsonUnmarshaller)
   protected val updateTimeToLiveU = protocol.createResponseHandler(meta, new UpdateTimeToLiveResultJsonUnmarshaller)

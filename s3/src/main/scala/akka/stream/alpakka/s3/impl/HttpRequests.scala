@@ -1,22 +1,29 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.s3.impl
 
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
+
+import akka.annotation.InternalApi
 import akka.http.scaladsl.marshallers.xml.ScalaXmlSupport._
 import akka.http.scaladsl.marshalling.Marshal
 import akka.http.scaladsl.model.Uri.{Authority, Query}
-import akka.http.scaladsl.model.headers.Host
+import akka.http.scaladsl.model.headers.{`Raw-Request-URI`, Host, RawHeader}
 import akka.http.scaladsl.model.{ContentTypes, RequestEntity, _}
-import akka.stream.alpakka.s3.S3Settings
+import akka.stream.alpakka.s3.{ApiVersion, S3Settings}
 import akka.stream.scaladsl.Source
 import akka.util.ByteString
 
 import scala.collection.immutable.Seq
 import scala.concurrent.{ExecutionContext, Future}
 
-private[alpakka] object HttpRequests {
+/**
+ * Internal Api
+ */
+@InternalApi private[impl] object HttpRequests {
 
   def listBucket(
       bucket: String,
@@ -24,11 +31,16 @@ private[alpakka] object HttpRequests {
       continuationToken: Option[String] = None
   )(implicit conf: S3Settings): HttpRequest = {
 
+    val (listType, continuationTokenName) = conf.listBucketApiVersion match {
+      case ApiVersion.ListBucketVersion1 => (None, "marker")
+      case ApiVersion.ListBucketVersion2 => (Some("2"), "continuation-token")
+    }
+
     val query = Query(
       Seq(
-        "list-type" -> Some("2"),
+        "list-type" -> listType,
         "prefix" -> prefix,
-        "continuation-token" -> continuationToken
+        continuationTokenName -> continuationToken
       ).collect { case (k, Some(v)) => k -> v }.toMap
     )
 
@@ -39,43 +51,56 @@ private[alpakka] object HttpRequests {
 
   def getDownloadRequest(s3Location: S3Location,
                          method: HttpMethod = HttpMethods.GET,
-                         s3Headers: S3Headers = S3Headers.empty)(implicit conf: S3Settings): HttpRequest =
-    s3Request(s3Location, method)
-      .withDefaultHeaders(s3Headers.headers: _*)
+                         s3Headers: Seq[HttpHeader] = Seq.empty,
+                         versionId: Option[String] = None)(implicit conf: S3Settings): HttpRequest = {
+    val query = versionId
+      .map(vId => Query("versionId" -> URLDecoder.decode(vId, StandardCharsets.UTF_8.toString)))
+      .getOrElse(Query())
+    s3Request(s3Location, method, _.withQuery(query))
+      .withDefaultHeaders(s3Headers)
+  }
+
+  def bucketManagementRequest(
+      s3Location: S3Location,
+      method: HttpMethod,
+      headers: Seq[HttpHeader] = Seq.empty[HttpHeader]
+  )(implicit conf: S3Settings): HttpRequest =
+    s3Request(s3Location = s3Location, method = method)
+      .withDefaultHeaders(headers)
 
   def uploadRequest(s3Location: S3Location,
                     payload: Source[ByteString, _],
                     contentLength: Long,
                     contentType: ContentType,
-                    s3Headers: S3Headers)(
+                    s3Headers: Seq[HttpHeader])(
       implicit conf: S3Settings
   ): HttpRequest =
     s3Request(
       s3Location,
       HttpMethods.PUT
-    ).withDefaultHeaders(s3Headers.headers: _*)
+    ).withDefaultHeaders(s3Headers)
       .withEntity(HttpEntity(contentType, contentLength, payload))
 
-  def initiateMultipartUploadRequest(s3Location: S3Location, contentType: ContentType, s3Headers: S3Headers)(
+  def initiateMultipartUploadRequest(s3Location: S3Location, contentType: ContentType, s3Headers: Seq[HttpHeader])(
       implicit conf: S3Settings
   ): HttpRequest =
     s3Request(s3Location, HttpMethods.POST, _.withQuery(Query("uploads")))
-      .withDefaultHeaders(s3Headers.headers: _*)
+      .withDefaultHeaders(s3Headers)
       .withEntity(HttpEntity.empty(contentType))
 
   def uploadPartRequest(upload: MultipartUpload,
                         partNumber: Int,
                         payload: Source[ByteString, _],
                         payloadSize: Int,
-                        s3Headers: S3Headers = S3Headers.empty)(implicit conf: S3Settings): HttpRequest =
+                        s3Headers: Seq[HttpHeader] = Seq.empty)(implicit conf: S3Settings): HttpRequest =
     s3Request(
       upload.s3Location,
       HttpMethods.PUT,
       _.withQuery(Query("partNumber" -> partNumber.toString, "uploadId" -> upload.uploadId))
-    ).withDefaultHeaders(s3Headers.headers: _*)
+    ).withDefaultHeaders(s3Headers)
       .withEntity(HttpEntity(ContentTypes.`application/octet-stream`, payloadSize, payload))
 
-  def completeMultipartUploadRequest(upload: MultipartUpload, parts: Seq[(Int, String)])(
+  def completeMultipartUploadRequest(upload: MultipartUpload, parts: Seq[(Int, String)], headers: Seq[HttpHeader])(
       implicit ec: ExecutionContext,
       conf: S3Settings
   ): Future[HttpRequest] = {
@@ -96,20 +121,51 @@ private[alpakka] object HttpRequests {
         upload.s3Location,
         HttpMethods.POST,
         _.withQuery(Query("uploadId" -> upload.uploadId))
-      ).withEntity(entity)
+      ).withEntity(entity).withDefaultHeaders(headers)
     }
   }
 
-  private[this] def s3Request(s3Location: S3Location,
-                              method: HttpMethod = HttpMethods.GET,
-                              uriFn: (Uri => Uri) = identity)(implicit conf: S3Settings): HttpRequest =
+  def uploadCopyPartRequest(multipartCopy: MultipartCopy,
+                            sourceVersionId: Option[String] = None,
+                            s3Headers: Seq[HttpHeader] = Seq.empty)(implicit conf: S3Settings): HttpRequest = {
+    val upload = multipartCopy.multipartUpload
+    val copyPartition = multipartCopy.copyPartition
+    val range = copyPartition.range
+    val source = copyPartition.sourceLocation
+    val sourceHeaderValuePrefix = s"/${source.bucket}/${source.key}"
+    val sourceHeaderValue = sourceVersionId
+      .map(versionId => s"$sourceHeaderValuePrefix?versionId=$versionId")
+      .getOrElse(sourceHeaderValuePrefix)
+    val sourceHeader = RawHeader("x-amz-copy-source", sourceHeaderValue)
+    val copyHeaders = range
+      .map(br => Seq(sourceHeader, RawHeader("x-amz-copy-source-range", s"bytes=${br.first}-${br.last - 1}")))
+      .getOrElse(Seq(sourceHeader))
+
+    val allHeaders = s3Headers ++ copyHeaders
+
+    s3Request(upload.s3Location,
+              HttpMethods.PUT,
+              _.withQuery(Query("partNumber" -> copyPartition.partNumber.toString, "uploadId" -> upload.uploadId)))
+      .withDefaultHeaders(allHeaders)
+  }
+
+  private[this] def s3Request(s3Location: S3Location, method: HttpMethod, uriFn: Uri => Uri = identity)(
+      implicit conf: S3Settings
+  ): HttpRequest = {
+    val s3RequestUri = uriFn(requestUri(s3Location.bucket, Some(s3Location.key)))
+
     HttpRequest(method)
-      .withHeaders(Host(requestAuthority(s3Location.bucket, conf.s3RegionProvider.getRegion)))
-      .withUri(uriFn(requestUri(s3Location.bucket, Some(s3Location.key))))
+      .withHeaders(
+        Host(requestAuthority(s3Location.bucket, conf.s3RegionProvider.getRegion)),
+        `Raw-Request-URI`(rawRequestUri(s3RequestUri))
+      )
+      .withUri(s3RequestUri)
+  }
 
   @throws(classOf[IllegalUriException])
   private[this] def requestAuthority(bucket: String, region: String)(implicit conf: S3Settings): Authority =
-    conf.proxy match {
+    conf.endpointUrl match {
+      case Some(endpointUrl) => Uri(endpointUrl).authority
       case None =>
         if (!conf.pathStyleAccess) {
           val bucketRegex = "[^a-z0-9\\-\\.]{1,255}|[\\.]{2,}".r
@@ -118,16 +174,14 @@ private[alpakka] object HttpRequests {
               throw IllegalUriException(
                 "Bucket name contains non-LDH characters",
                 s"""The following character is not allowed: $illegalCharacter
-                   | This may be solved by setting akka.stream.alpakka.s3.path-style-access to true in the configuration.
+                       | This may be solved by setting alpakka.s3.path-style-access to true in the configuration.
                  """.stripMargin
               )
             case None => ()
           }
         }
-        (region, conf.endpointUrl) match {
-          case (_, Some(endpointUrl)) =>
-            Uri(endpointUrl).authority
-          case ("us-east-1", _) =>
+        region match {
+          case "us-east-1" =>
             if (conf.pathStyleAccess) {
               Authority(Uri.Host("s3.amazonaws.com"))
             } else {
@@ -140,7 +194,6 @@ private[alpakka] object HttpRequests {
               Authority(Uri.Host(s"$bucket.s3-$region.amazonaws.com"))
             }
         }
-      case Some(proxy) => Authority(Uri.Host(proxy.host))
     }
 
   private[this] def requestUri(bucket: String, key: Option[String])(implicit conf: S3Settings): Uri = {
@@ -153,15 +206,26 @@ private[alpakka] object HttpRequests {
       someKey.split("/").foldLeft(basePath)((acc, p) => acc / p)
     }
     val uri = Uri(path = path, authority = requestAuthority(bucket, conf.s3RegionProvider.getRegion))
+      .withHost(requestAuthority(bucket, conf.s3RegionProvider.getRegion).host)
 
-    (conf.proxy, conf.endpointUrl) match {
-      case (_, Some(endpointUri)) =>
-        uri
-          .withScheme(Uri(endpointUri).scheme)
-          .withHost(requestAuthority(bucket, conf.s3RegionProvider.getRegion).host)
-      case (None, _) =>
-        uri.withScheme("https").withHost(requestAuthority(bucket, conf.s3RegionProvider.getRegion).host)
-      case (Some(proxy), _) => uri.withPort(proxy.port).withScheme(proxy.scheme).withHost(proxy.host)
+    conf.endpointUrl match {
+      case Some(endpointUri) =>
+        uri.withScheme(Uri(endpointUri).scheme)
+      case None =>
+        uri.withScheme("https")
+    }
+  }
+
+  private def rawRequestUri(uri: Uri): String = {
+    val rawUri = uri.toString
+    val rawPath = uri.path.toString()
+
+    if (rawPath.contains("+")) {
+      val fixedPath = rawPath.replaceAll("\\+", "%2B")
+
+      rawUri.replace(rawPath, fixedPath)
+    } else {
+      rawUri
     }
   }
 }

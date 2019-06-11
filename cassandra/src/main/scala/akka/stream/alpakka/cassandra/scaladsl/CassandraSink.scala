@@ -1,17 +1,21 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.cassandra.scaladsl
 
 import akka.Done
+import akka.annotation.ApiMayChange
+import akka.stream.alpakka.cassandra.impl.GuavaFutures._
 import akka.stream.scaladsl.{Flow, Keep, Sink}
 import com.datastax.driver.core.{BoundStatement, PreparedStatement, Session}
 
 import scala.concurrent.Future
 
-import akka.stream.alpakka.cassandra.GuavaFutures._
-
+/**
+ * Scala API to create Cassandra Sinks.
+ */
+@ApiMayChange // https://github.com/akka/alpakka/issues/1213
 object CassandraSink {
   def apply[T](
       parallelism: Int,

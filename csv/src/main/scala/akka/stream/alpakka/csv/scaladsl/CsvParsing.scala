@@ -1,11 +1,11 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.csv.scaladsl
 
 import akka.NotUsed
-import akka.stream.alpakka.csv.CsvParsingStage
+import akka.stream.alpakka.csv.impl.CsvParsingStage
 import akka.stream.scaladsl.Flow
 import akka.util.ByteString
 

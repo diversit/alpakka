@@ -1,4 +1,4 @@
-# JMS examples
+# JMS
 
 ### Example: Read text messages from JMS queue and append to file
 
@@ -7,10 +7,10 @@
 - and appends the data to the file `target/out` (2).
 
 Scala
-: @@snip ($alpakka$/doc-examples/src/main/scala/jms/JmsToFile.scala) { #sample }
+: @@snip [snip](/doc-examples/src/main/scala/jms/JmsToFile.scala) { #sample }
 
-@github[Full source](/doc-examples/src/main/scala/jms/JmsToFile.scala) { #sample }
-
+Java
+: @@snip [snip](/doc-examples/src/main/java/jms/javasamples/JmsToFile.java) { #sample }
 
 ### Example: Read text messages from JMS queue and create one file per message
 
@@ -21,11 +21,10 @@ Scala
 value to create unique file names (4). 
 
 Scala
-: @@snip ($alpakka$/doc-examples/src/main/scala/jms/JmsToOneFilePerMessage.scala) { #sample }
+: @@snip [snip](/doc-examples/src/main/scala/jms/JmsToOneFilePerMessage.scala) { #sample }
 
-@github[Full source](/doc-examples/src/main/scala/jms/JmsToOneFilePerMessage.scala) { #sample }
-
-
+Java
+: @@snip [snip](/doc-examples/src/main/java/jms/javasamples/JmsToOneFilePerMessage.java) { #sample }
 
 ### Example: Read text messages from JMS queue and send to web server
 
@@ -36,30 +35,26 @@ Scala
 - prints the `HttpResponse` to standard out (5).
 
 Scala
-: @@snip ($alpakka$/doc-examples/src/main/scala/jms/JmsToHttpGet.scala) { #sample }
+: @@snip [snip](/doc-examples/src/main/scala/jms/JmsToHttpGet.scala) { #sample }
 
-@github[Full source](/doc-examples/src/main/scala/jms/JmsToHttpGet.scala) { #sample }
-
-
+Java
+: @@snip [snip](/doc-examples/src/main/java/jms/javasamples/JmsToHttpGet.java) { #sample }
 
 ### Example: Read text messages from JMS queue and send to web socket
 
 - listens to the JMS queue "test" receiving `String`s (1),
 - configures a web socket flow to localhost (2),
-- converts incoming data to a @scaladoc[ws.TextMessage](akka.http.scaladsl.model.ws.TextMessage) (3),
+- converts incoming data to a @scala[@scaladoc[ws.TextMessage](akka.http.scaladsl.model.ws.TextMessage)]@java[@scaladoc[akka.http.javadsl.model.ws.TextMessage](akka.http.javadsl.model.ws.TextMessage)] (3),
 - pass the message via the web socket flow (4),
 - convert the (potentially chunked) web socket reply to a `String` (5),
 - prefix the `String` (6),
 - end the stream by writing the values to standard out (7).
 
-
-
 Scala
-: @@snip ($alpakka$/doc-examples/src/main/scala/jms/JmsToWebSocket.scala) { #sample }
+: @@snip [snip](/doc-examples/src/main/scala/jms/JmsToWebSocket.scala) { #sample }
 
-@github[Full source](/doc-examples/src/main/scala/jms/JmsToWebSocket.scala) { #sample }
-
-
+Java
+: @@snip [snip](/doc-examples/src/main/java/jms/javasamples/JmsToWebSocket.java) { #sample }
 
 ### Running the example code
 

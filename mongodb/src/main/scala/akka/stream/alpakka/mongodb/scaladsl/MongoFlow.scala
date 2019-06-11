@@ -1,116 +1,106 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.mongodb.scaladsl
 
-import akka.stream.scaladsl.Flow
+import akka.stream.scaladsl.{Flow, Source}
 import akka.NotUsed
-import org.mongodb.scala.bson.conversions.Bson
-import org.mongodb.scala.model.UpdateOptions
-import org.mongodb.scala.result.{DeleteResult, UpdateResult}
-import org.mongodb.scala.{Document, MongoCollection}
+import akka.annotation.InternalApi
+import akka.stream.alpakka.mongodb.DocumentUpdate
+import com.mongodb.client.model.{DeleteOptions, InsertManyOptions, InsertOneOptions, UpdateOptions}
+import com.mongodb.client.result.{DeleteResult, UpdateResult}
+import com.mongodb.reactivestreams.client.MongoCollection
+import org.bson.conversions.Bson
 
-import scala.concurrent.ExecutionContext
+import scala.collection.JavaConverters._
 
 object MongoFlow {
 
+  /** Internal Api */
+  @InternalApi private[mongodb] val DefaultInsertOneOptions = new InsertOneOptions()
+
+  /** Internal Api */
+  @InternalApi private[mongodb] val DefaultInsertManyOptions = new InsertManyOptions()
+
+  /** Internal Api */
+  @InternalApi private[mongodb] val DefaultUpdateOptions = new UpdateOptions()
+
+  /** Internal Api */
+  @InternalApi private[mongodb] val DefaultDeleteOptions = new DeleteOptions()
+
   /**
-   * A [[Flow]] that will insert documents into a collection.
-   * @param parallelism number of documents to insert in parallel.
+   * A [[akka.stream.scaladsl.Flow Flow]] that will insert documents into a collection.
+   *
    * @param collection mongo db collection to insert to.
+   * @param options options to apply to the operation
    */
-  def insertOne(parallelism: Int, collection: MongoCollection[Document])(
-      implicit executionContext: ExecutionContext
-  ): Flow[Document, Document, NotUsed] =
-    Flow[Document]
-      .mapAsync(parallelism)(doc => collection.insertOne(doc).toFuture().map(_ => doc))
+  def insertOne[T](collection: MongoCollection[T],
+                   options: InsertOneOptions = DefaultInsertOneOptions): Flow[T, T, NotUsed] =
+    Flow[T]
+      .flatMapConcat(doc => Source.fromPublisher(collection.insertOne(doc, options)).map(_ => doc))
 
   /**
-   * A [[Flow]] that will insert batches documents into a collection.
-   * @param parallelism number of batches of documents to insert in parallel.
+   * A [[akka.stream.scaladsl.Flow Flow]] that will insert batches documents into a collection.
+   *
    * @param collection mongo db collection to insert to.
+   * @param options options to apply to the operation
    */
-  def insertMany(parallelism: Int, collection: MongoCollection[Document])(
-      implicit executionContext: ExecutionContext
-  ): Flow[Seq[Document], Seq[Document], NotUsed] =
-    Flow[Seq[Document]].mapAsync(parallelism)(docs => collection.insertMany(docs).toFuture().map(_ => docs))
+  def insertMany[T](collection: MongoCollection[T],
+                    options: InsertManyOptions = DefaultInsertManyOptions): Flow[Seq[T], Seq[T], NotUsed] =
+    Flow[Seq[T]].flatMapConcat(docs => Source.fromPublisher(collection.insertMany(docs.asJava, options)).map(_ => docs))
 
   /**
-   * A [[Flow]] that will update documents as defined by a [[DocumentUpdate]].
+   * A [[akka.stream.scaladsl.Flow Flow]] that will update documents as defined by a [[DocumentUpdate]].
    *
-   * @param parallelism the number of documents to update in parallel.
    * @param collection the mongo db collection to update.
-   * @param maybeUpdateOptions optional additional [[UpdateOptions]]
+   * @param options options to apply to the operation
    */
-  def updateOne(
-      parallelism: Int,
-      collection: MongoCollection[Document],
-      maybeUpdateOptions: Option[UpdateOptions] = None
-  )(implicit executionContext: ExecutionContext): Flow[DocumentUpdate, (UpdateResult, DocumentUpdate), NotUsed] =
-    maybeUpdateOptions match {
-      case None =>
-        Flow[DocumentUpdate].mapAsync(parallelism)(
-          documentUpdate =>
-            collection.updateOne(documentUpdate.filter, documentUpdate.update).toFuture().map(_ -> documentUpdate)
-        )
-      case Some(options) =>
-        Flow[DocumentUpdate].mapAsync(parallelism)(
-          documentUpdate =>
-            collection
-              .updateOne(documentUpdate.filter, documentUpdate.update, options)
-              .toFuture()
-              .map(_ -> documentUpdate)
-        )
-    }
+  def updateOne[T](
+      collection: MongoCollection[T],
+      options: UpdateOptions = DefaultUpdateOptions
+  ): Flow[DocumentUpdate, (UpdateResult, DocumentUpdate), NotUsed] =
+    Flow[DocumentUpdate].flatMapConcat(
+      documentUpdate =>
+        Source
+          .fromPublisher(collection.updateOne(documentUpdate.filter, documentUpdate.update, options))
+          .map(_ -> documentUpdate)
+    )
 
   /**
-   * A [[Flow]] that will update many documents as defined by a [[DocumentUpdate]].
+   * A [[akka.stream.scaladsl.Flow Flow]] that will update many documents as defined by a [[DocumentUpdate]].
    *
-   * @param parallelism the number of documents to update in parallel.
    * @param collection the mongo db collection to update.
-   * @param maybeUpdateOptions optional additional [[UpdateOptions]]
+   * @param options options to apply to the operation
    */
-  def updateMany(
-      parallelism: Int,
-      collection: MongoCollection[Document],
-      maybeUpdateOptions: Option[UpdateOptions] = None
-  )(implicit executionContext: ExecutionContext): Flow[DocumentUpdate, (UpdateResult, DocumentUpdate), NotUsed] =
-    maybeUpdateOptions match {
-      case None =>
-        Flow[DocumentUpdate].mapAsync(parallelism)(
-          documentUpdate =>
-            collection.updateMany(documentUpdate.filter, documentUpdate.update).toFuture().map(_ -> documentUpdate)
-        )
-      case Some(options) =>
-        Flow[DocumentUpdate].mapAsync(parallelism)(
-          documentUpdate =>
-            collection
-              .updateMany(documentUpdate.filter, documentUpdate.update, options)
-              .toFuture()
-              .map(_ -> documentUpdate)
-        )
-    }
+  def updateMany[T](
+      collection: MongoCollection[T],
+      options: UpdateOptions = DefaultUpdateOptions
+  ): Flow[DocumentUpdate, (UpdateResult, DocumentUpdate), NotUsed] =
+    Flow[DocumentUpdate].flatMapConcat(
+      documentUpdate =>
+        Source
+          .fromPublisher(collection.updateMany(documentUpdate.filter, documentUpdate.update, options))
+          .map(_ -> documentUpdate)
+    )
 
   /**
-   * A [[Flow]] that will delete individual documents as defined by a [[Bson]] filter query.
+   * A [[akka.stream.scaladsl.Flow Flow]] that will delete individual documents as defined by a [[org.bson.conversions.Bson Bson]] filter query.
    *
-   * @param parallelism the number of documents to delete in parallel.
    * @param collection the mongo db collection to update.
+   * @param options options to apply to the operation
    */
-  def deleteOne(parallelism: Int, collection: MongoCollection[Document])(
-      implicit executionContext: ExecutionContext
-  ): Flow[Bson, (DeleteResult, Bson), NotUsed] =
-    Flow[Bson].mapAsync(parallelism)(bson => collection.deleteOne(bson).toFuture().map(_ -> bson))
+  def deleteOne[T](collection: MongoCollection[T],
+                   options: DeleteOptions = DefaultDeleteOptions): Flow[Bson, (DeleteResult, Bson), NotUsed] =
+    Flow[Bson].flatMapConcat(bson => Source.fromPublisher(collection.deleteOne(bson, options)).map(_ -> bson))
 
   /**
-   * A [[Flow]] that will delete many documents as defined by a [[Bson]] filter query.
+   * A [[akka.stream.scaladsl.Flow Flow]] that will delete many documents as defined by a [[org.bson.conversions.Bson Bson]] filter query.
    *
-   * @param parallelism the number of documents to delete in parallel.
    * @param collection the mongo db collection to update.
+   * @param options options to apply to the operation
    */
-  def deleteMany(parallelism: Int, collection: MongoCollection[Document])(
-      implicit executionContext: ExecutionContext
-  ): Flow[Bson, (DeleteResult, Bson), NotUsed] =
-    Flow[Bson].mapAsync(parallelism)(bson => collection.deleteMany(bson).toFuture().map(_ -> bson))
+  def deleteMany[T](collection: MongoCollection[T],
+                    options: DeleteOptions = DefaultDeleteOptions): Flow[Bson, (DeleteResult, Bson), NotUsed] =
+    Flow[Bson].flatMapConcat(bson => Source.fromPublisher(collection.deleteMany(bson, options)).map(_ -> bson))
 }

@@ -1,22 +1,23 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package jms
 
 // #sample
+import akka.Done
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.model._
-import akka.stream.alpakka.jms.JmsSourceSettings
-import akka.stream.alpakka.jms.scaladsl.JmsSource
-import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.alpakka.jms.JmsConsumerSettings
+import akka.stream.alpakka.jms.scaladsl.{JmsConsumer, JmsConsumerControl}
+import akka.stream.scaladsl.{Keep, Sink, Source}
 import akka.util.ByteString
-import akka.{Done, NotUsed}
-import playground.{ActiveMqBroker, WebServer}
 
 import scala.concurrent.Future
+import scala.concurrent.duration.DurationInt
 
 // #sample
+import playground.{ActiveMqBroker, WebServer}
 
 object JmsToHttpGet extends JmsSampleBase with App {
 
@@ -28,25 +29,27 @@ object JmsToHttpGet extends JmsSampleBase with App {
 
   // format: off
   // #sample
-  val jmsSource: Source[String, _] =                                        // (1)
-    JmsSource.textSource(
-      JmsSourceSettings(connectionFactory).withBufferSize(10).withQueue("test")
+  val jmsSource: Source[String, JmsConsumerControl] =                                 // (1)
+    JmsConsumer.textSource(
+      JmsConsumerSettings(actorSystem,connectionFactory).withBufferSize(10).withQueue("test")
     )
 
-  val finished: Future[Done] =
-    jmsSource
-      .map(ByteString(_))                                                   // (2)
+  val (runningSource, finished): (JmsConsumerControl, Future[Done]) =
+    jmsSource                                                   //: String
+      .map(ByteString(_))                                       //: ByteString   (2)
       .map { bs =>
-        HttpRequest(uri = Uri("http://localhost:8080/hello"),               // (3)
+        HttpRequest(uri = Uri("http://localhost:8080/hello"),   //: HttpRequest  (3)
           entity = HttpEntity(bs))
       }
-      .mapAsyncUnordered(4)(Http().singleRequest(_))                        // (4)
-      .runWith(Sink.foreach(println))                                       // (5)
+      .mapAsyncUnordered(4)(Http().singleRequest(_))            //: HttpResponse (4)
+      .toMat(Sink.foreach(println))(Keep.both)                  //               (5)
+      .run()
   // #sample
   // format: on
   finished.foreach(_ => println("stream finished"))
 
-  wait(10)
+  wait(5.seconds)
+  runningSource.shutdown()
   for {
     _ <- actorSystem.terminate()
     _ <- WebServer.stop()

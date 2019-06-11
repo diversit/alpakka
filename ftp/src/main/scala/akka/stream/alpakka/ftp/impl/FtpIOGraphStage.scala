@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.ftp
@@ -14,8 +14,14 @@ import akka.util.ByteString.ByteString1C
 import scala.concurrent.{Future, Promise}
 import java.io.{IOException, InputStream, OutputStream}
 
+import akka.annotation.InternalApi
+
 import scala.util.control.NonFatal
 
+/**
+ * INTERNAL API
+ */
+@InternalApi
 private[ftp] trait FtpIOGraphStage[FtpClient, S <: RemoteFileSettings, Sh <: Shape]
     extends GraphStageWithMaterializedValue[Sh, Future[IOResult]] {
 
@@ -35,10 +41,16 @@ private[ftp] trait FtpIOGraphStage[FtpClient, S <: RemoteFileSettings, Sh <: Sha
   override def shape: Sh
 }
 
+/**
+ * INTERNAL API
+ */
+@InternalApi
 private[ftp] trait FtpIOSourceStage[FtpClient, S <: RemoteFileSettings]
     extends FtpIOGraphStage[FtpClient, S, SourceShape[ByteString]] {
 
   def chunkSize: Int
+
+  def offset: Long = 0L
 
   val shape: SourceShape[ByteString] = SourceShape(Outlet[ByteString](s"$name.out"))
   val out: Outlet[ByteString] = shape.outlets.head.asInstanceOf[Outlet[ByteString]]
@@ -77,6 +89,12 @@ private[ftp] trait FtpIOSourceStage[FtpClient, S <: RemoteFileSettings]
           isOpt.foreach { os =>
             try {
               os.close()
+              ftpLike match {
+                case cfo: CommonFtpOperations =>
+                  if (!cfo.completePendingCommand(handler.get.asInstanceOf[cfo.Handler]))
+                    throw new IOException("File transfer failed.")
+                case _ =>
+              }
             } catch {
               case e: IOException =>
                 matFailure(e)
@@ -93,7 +111,12 @@ private[ftp] trait FtpIOSourceStage[FtpClient, S <: RemoteFileSettings]
         }
 
       protected[this] def doPreStart(): Unit =
-        isOpt = Some(ftpLike.retrieveFileInputStream(path, handler.get).get)
+        isOpt = ftpLike match {
+          case ro: RetrieveOffset =>
+            Some(ro.retrieveFileInputStream(path, handler.get.asInstanceOf[ro.Handler], offset).get)
+          case _ =>
+            Some(ftpLike.retrieveFileInputStream(path, handler.get).get)
+        }
 
       protected[this] def matSuccess(): Boolean =
         matValuePromise.trySuccess(IOResult.createSuccessful(readBytesTotal))
@@ -126,6 +149,10 @@ private[ftp] trait FtpIOSourceStage[FtpClient, S <: RemoteFileSettings]
 
 }
 
+/**
+ * INTERNAL API
+ */
+@InternalApi
 private[ftp] trait FtpIOSinkStage[FtpClient, S <: RemoteFileSettings]
     extends FtpIOGraphStage[FtpClient, S, SinkShape[ByteString]] {
 
@@ -170,6 +197,12 @@ private[ftp] trait FtpIOSinkStage[FtpClient, S <: RemoteFileSettings]
           osOpt.foreach { os =>
             try {
               os.close()
+              ftpLike match {
+                case cfo: CommonFtpOperations =>
+                  if (!cfo.completePendingCommand(handler.get.asInstanceOf[cfo.Handler]))
+                    throw new IOException("File transfer failed.")
+                case _ =>
+              }
             } catch {
               case e: IOException =>
                 matFailure(e)
@@ -210,6 +243,10 @@ private[ftp] trait FtpIOSinkStage[FtpClient, S <: RemoteFileSettings]
 
 }
 
+/**
+ * INTERNAL API
+ */
+@InternalApi
 private[ftp] trait FtpMoveSink[FtpClient, S <: RemoteFileSettings]
     extends GraphStageWithMaterializedValue[SinkShape[FtpFile], Future[IOResult]] {
   val connectionSettings: S
@@ -250,6 +287,10 @@ private[ftp] trait FtpMoveSink[FtpClient, S <: RemoteFileSettings]
   }
 }
 
+/**
+ * INTERNAL API
+ */
+@InternalApi
 private[ftp] trait FtpRemoveSink[FtpClient, S <: RemoteFileSettings]
     extends GraphStageWithMaterializedValue[SinkShape[FtpFile], Future[IOResult]] {
   val connectionSettings: S

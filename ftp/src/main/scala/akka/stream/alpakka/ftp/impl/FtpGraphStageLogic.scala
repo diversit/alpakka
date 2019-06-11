@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.ftp
@@ -7,11 +7,16 @@ package impl
 
 import java.io.IOException
 
+import akka.annotation.InternalApi
 import akka.stream.Shape
 import akka.stream.stage.GraphStageLogic
 
 import scala.util.control.NonFatal
 
+/**
+ * INTERNAL API
+ */
+@InternalApi
 private[ftp] abstract class FtpGraphStageLogic[T, FtpClient, S <: RemoteFileSettings](
     val shape: Shape,
     val ftpLike: FtpLike[FtpClient, S],

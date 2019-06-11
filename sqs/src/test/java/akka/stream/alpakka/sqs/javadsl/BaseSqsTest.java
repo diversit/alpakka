@@ -1,65 +1,83 @@
 /*
- * Copyright (C) 2016-2018 Lightbend Inc. <http://www.lightbend.com>
+ * Copyright (C) 2016-2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
 package akka.stream.alpakka.sqs.javadsl;
-import com.amazonaws.auth.AWSCredentials;
-import com.amazonaws.auth.AWSCredentialsProvider;
-import com.amazonaws.auth.AWSStaticCredentialsProvider;
-import com.amazonaws.auth.BasicAWSCredentials;
-import com.amazonaws.client.builder.AwsClientBuilder;
-import com.amazonaws.services.sqs.AmazonSQSAsync;
-import com.amazonaws.services.sqs.AmazonSQSAsyncClientBuilder;
-import org.elasticmq.rest.sqs.SQSRestServer;
-import org.elasticmq.rest.sqs.SQSRestServerBuilder;
-import org.junit.After;
-import org.junit.Before;
 
-import java.net.InetSocketAddress;
+import akka.actor.ActorSystem;
+import akka.stream.ActorMaterializer;
+import akka.stream.Materializer;
+import akka.testkit.javadsl.TestKit;
+// #init-client
+import com.github.matsluni.akkahttpspi.AkkaHttpClient;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.sqs.SqsAsyncClient;
+
+// #init-client
+import org.junit.AfterClass;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
+
+import java.net.URI;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 public abstract class BaseSqsTest {
 
-    private boolean initialized = false;
-    private boolean tornDown = false;
-    private SQSRestServer sqsServer;
-    private InetSocketAddress sqsAddress;
-    private int sqsPort = 0;
-    protected String sqsEndpoint;
-    protected AWSCredentialsProvider credentialsProvider =
-            new AWSStaticCredentialsProvider(new BasicAWSCredentials("x", "x"));
-    protected AmazonSQSAsync sqsClient;
+  protected static ActorSystem system;
+  protected static Materializer materializer;
 
-    @Before
-    public void setupBefore() {
-        if (!initialized) {
-            sqsServer = SQSRestServerBuilder.withDynamicPort().start();
-            sqsAddress = sqsServer.waitUntilStarted().localAddress();
-            sqsPort = sqsAddress.getPort();
-            sqsEndpoint = "http://" + sqsAddress.getHostName() + ":" + sqsPort;
-            sqsClient = createAsyncClient(sqsEndpoint, credentialsProvider);
-            initialized = true;
-        }
+  private boolean initialized = false;
+  protected String sqsEndpoint = "http://localhost:9324";
+  protected SqsAsyncClient sqsClient;
+
+  @BeforeClass
+  public static void setup() {
+    // #init-mat
+    system = ActorSystem.create();
+    materializer = ActorMaterializer.create(system);
+    // #init-mat
+  }
+
+  @AfterClass
+  public static void teardown() {
+    TestKit.shutdownActorSystem(system);
+  }
+
+  @Before
+  public void setupBefore() {
+    if (!initialized) {
+      sqsClient = createAsyncClient(sqsEndpoint);
+      initialized = true;
     }
+  }
 
-    AmazonSQSAsync createAsyncClient(String sqsEndpoint, AWSCredentialsProvider credentialsProvider) {
-        //#init-client
-        AmazonSQSAsync client = AmazonSQSAsyncClientBuilder.standard()
-          .withCredentials(credentialsProvider)
-          .withEndpointConfiguration(
-                  new AwsClientBuilder.EndpointConfiguration(sqsEndpoint, "eu-central-1"))
-          .build();
-        //#init-client
-        return client;
-    }
+  private SqsAsyncClient createAsyncClient(String sqsEndpoint) {
+    // #init-client
+    SqsAsyncClient sqsClient =
+        SqsAsyncClient.builder()
+            .credentialsProvider(
+                StaticCredentialsProvider.create(AwsBasicCredentials.create("x", "x")))
+            .endpointOverride(URI.create(sqsEndpoint))
+            .region(Region.EU_CENTRAL_1)
+            .httpClient(AkkaHttpClient.builder().withActorSystem(system).build())
+            .build();
 
+    system.registerOnTermination(() -> sqsClient.close());
+    // #init-client
+    return sqsClient;
+  }
 
-    @After
-    public void tearDownAfter() {
-        if (!tornDown){
-            sqsServer.stopAndWait();
-            tornDown = true;
-        }
-    }
-
-
+  protected String randomQueueUrl() throws Exception {
+    return sqsClient
+        .createQueue(
+            CreateQueueRequest.builder()
+                .queueName(String.format("queue-%s", new Random().nextInt()))
+                .build())
+        .get(2, TimeUnit.SECONDS)
+        .queueUrl();
+  }
 }
